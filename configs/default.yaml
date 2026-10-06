@@ -1,0 +1,139 @@
+# Bin-picking 6DoF pipeline: Mask R-CNN detector -> GDRN-style RGB-D pose net -> ICP on CAD.
+# Override any value from the CLI:  --set pose.train.lr=1e-4 --set data.val_scenes=[000008,000009]
+
+seed: 0
+device: cuda
+
+data:
+  root: data/bin_ds_side_plate_bp_sample   # dir with shard_* folders
+  val_scenes: ["000009"]                   # split by SCENE (piles repeat within a scene)
+  obj_id: 1
+  bin_margin_mm: 50.0                      # parts outside bin footprint + margin = picked/parked
+  num_workers: 8
+
+# ---------------------------------------------------------------------------- stage 1
+detector:
+  out_dir: runs/detector
+  arch: maskrcnn_resnet50_fpn_v2           # torchvision (BSD licensed)
+  pretrained: true                         # COCO weights
+  min_visib_px: 30                         # instances smaller than this are not trained on
+  train_crop: 640                          # random square crops at native resolution
+  max_detections: 400                      # bins hold ~300 parts
+  rpn_pre_nms_top_n: {train: 4000, test: 4000}
+  rpn_post_nms_top_n: {train: 2000, test: 2000}
+  roi_batch_size_per_image: 512
+  aug:                                     # training only (plus random crops and h/v flips)
+    rot90: true                            # random 0/90/180/270 rotation of the square crop
+    color_prob: 0.8
+    brightness: 0.3
+    contrast: 0.3
+    saturation: 0.2
+    hue: 0.02
+    grayscale_prob: 0.2
+    blur_prob: 0.2
+    blur_sigma: 1.2
+  train:
+    epochs: 40
+    batch_size: 8                          # 12.2 GB peak incl. eval; 12 -> 16.8 GB (too tight), 16 -> 19.8 GB
+    lr: 0.02                               # SGD, linear-scaled (0.01 @ batch 4)
+    momentum: 0.9
+    weight_decay: 1.0e-4
+    warmup_iters: 500
+    amp: true
+    grad_clip: 10.0
+    log_every: 20
+    gpu_mem_fraction: 0.67                 # allocator cap: + desktop/context keeps total GPU use < 75%
+  eval:
+    every_epochs: 2
+    view_stride: 5                         # evaluate every Nth view of val scenes
+    score_thresh: 0.5
+    mask_thresh: 0.5
+    min_visib_px: 500                      # GT considered "should detect" above this
+    iou_thresh: 0.5
+
+# ---------------------------------------------------------------------------- stage 2
+pose:
+  out_dir: runs/pose
+  # network input is always RGB + depth (xyz relative to target surface, valid) + target mask
+  backbone: convnext_base                  # any timm model with features_only support
+  pretrained: true                         # ImageNet weights (ignored for the backbone if use_pretrained_model)
+  # Initialise the backbone from an official GDRNPP checkpoint (BOP'22, ConvNeXt-base, RGB, per-object models).
+  # Only the backbone transfers: their heads are tied to their object. Requires backbone: convnext_base.
+  # Their RGB stem is folded into our 8-channel stem exactly; depth/mask channels start at zero.
+  use_pretrained_model: true
+  pretrained_model:
+    path: pretrained/gdrnpp_itodd_2.pth      # downloaded from url if missing
+    url: "https://www.modelscope.cn/api/v1/models/wangg12/GDRNPP/repo?Revision=master&FilePath=gdrn/itoddPbrSO/convnext_AugCosyAAEGray_DMask_amodalClipBox_itodd/2/model_final_wo_optim.pth"
+    input_format: BGR                      # GDRNPP: cv2 BGR, pixels/255 (PIXEL_MEAN 0, PIXEL_STD 255)
+    pixel_mean: [0.0, 0.0, 0.0]            # in 0..1 units, in input_format channel order
+    pixel_std: [1.0, 1.0, 1.0]
+  input_res: 256
+  output_res: 64
+  num_regions: 64                          # GDRN surface-region classes (0 disables)
+  num_model_points: 3000                   # for point-matching loss
+  # crops
+  min_visib_px: 500                        # train/val targets need this many visible px (~10% of part)
+  crops_per_frame: 16                      # instances sampled per image per step
+  pad_scale: 1.5                           # crop size = pad_scale * max(bbox w, h)
+  min_crop_px: 64
+  dzi_shift: 0.25                          # dynamic zoom-in jitter (fraction of bbox size)
+  dzi_scale: 0.25
+  mask_noise_px: 3                         # random dilate/erode of the input target mask
+  mask_noise_prob: 0.5
+  aug:                                     # training only; labels stay exact under all of these
+    rotate_prob: 0.8                       # virtual camera rotation (homography + rotated pose/points)
+    roll_deg: 180.0                        #   roll about the crop's viewing ray: +-roll_deg
+    tilt_deg: 8.0                          #   extra tilt about a random perpendicular axis: 0..tilt_deg
+    color_prob: 0.8
+    brightness: 0.3
+    contrast: 0.3
+    saturation: 0.3
+    grayscale_prob: 0.2
+    blur_prob: 0.2
+    blur_sigma: 1.2                        # px, at input_res
+    noise_std: 0.03                        # pixel noise (0..1 intensity)
+    depth_noise_mm: 1.0                    # noise along the viewing ray, sigma ~ U(0, this)
+    depth_hole_prob: 0.5                   # random circular depth dropouts (specular metal)
+    depth_max_holes: 4
+    depth_hole_radius: [0.03, 0.12]        # fraction of crop size
+  train:
+    epochs: 120
+    batch_frames: 4                        # x crops_per_frame = 64 crops; 15.1 GB peak (convnext_base, bf16)
+    optimizer: adamw
+    lr: 2.8e-4                             # sqrt-scaled (2e-4 @ 32 crops)
+    weight_decay: 1.0e-4
+    warmup_iters: 500
+    amp: bf16                              # bf16 | fp16 | none
+    grad_clip: 5.0
+    log_every: 50
+    gpu_mem_fraction: 0.67                 # allocator cap: + desktop/context keeps total GPU use < 75%
+  loss:                                    # GDRN loss set
+    mask_visib: 1.0
+    mask_full: 1.0
+    xyz: 1.0
+    region: 1.0
+    pm: 1.0                                # point-matching on rotation (symmetry-aware)
+    center: 1.0                            # SITE 2D centre offset
+    z: 1.0                                 # SITE scale-invariant depth
+  eval:
+    every_epochs: 5
+    crops_per_frame: 16
+
+# ---------------------------------------------------------------------------- stage 3
+refine:
+  icp_max_corr_mm: [8.0, 4.0, 2.0]         # coarse-to-fine correspondence distances
+  icp_iters: 30
+  min_points: 30                           # skip ICP with fewer observed points
+  mask_erode_px: 2                         # drop mask-edge points (neighbour bleed / depth edge noise)
+  max_rot_change_deg: 30.0                 # reject ICP corrections larger than these
+  max_trans_change_mm: 15.0
+  # label-free confidence flag per detection: ICP accepted AND fitness >= min AND
+  # inlier RMSE <= min(confidence_rmse_ratio * this frame's median RMSE, confidence_max_rmse_mm)
+  confidence_min_fitness: 0.9              # share of observed depth points within 2 mm of the CAD surface
+  confidence_rmse_ratio: 1.3               # relative to the frame's median fit error (adapts to sensor noise)
+  confidence_max_rmse_mm: 1.5              # absolute safety cap (and the only test with < 3 accepted fits)
+
+infer:
+  score_thresh: 0.5
+  min_mask_px: 300
+  pose_batch: 64

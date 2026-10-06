@@ -1,0 +1,34 @@
+# --- data: dataset and CAD models (data/bin_ds_*, data/*.stl) ---
+data/
+
+# --- model weights and training outputs ---
+# GDRNPP checkpoint, re-downloaded automatically from pose.pretrained_model.url
+pretrained/
+# checkpoints (best.pt / last.pt, up to 1.2 GB), TensorBoard logs, eval JSON/PNG/HTML
+runs/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+# interrupted downloads
+*.part
+
+# --- environment ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# --- logs ---
+*.log
+
+# --- notebooks ---
+.ipynb_checkpoints/
+
+# --- editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
