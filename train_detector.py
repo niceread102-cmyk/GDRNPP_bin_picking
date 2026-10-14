@@ -75,7 +75,9 @@ def main():
     img_hw = all_frames.load_images(0, 1.0)[0].shape[:2]
 
     nw = cfg.data.num_workers
-    kw = dict(collate_fn=det_collate, num_workers=nw, persistent_workers=nw > 0, pin_memory=True)
+    # spawn (the Windows default): forked workers deadlock on Linux
+    kw = dict(collate_fn=det_collate, num_workers=nw, persistent_workers=nw > 0, pin_memory=True,
+              multiprocessing_context="spawn" if nw > 0 else None)
     train_loader = DataLoader(DetectionDataset(train_frames, dc, train=True), batch_size=tc.batch_size,
                               shuffle=True, drop_last=True, **kw)
     val_set = Subset(DetectionDataset(val_frames, dc, train=False),

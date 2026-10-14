@@ -1,5 +1,17 @@
-# Install torch first with the CUDA index (see README / setup_venv.ps1):
-#   pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+# Project dependencies (Python 3.12). PyTorch is NOT listed here: it needs the CUDA-specific index, so
+# setup_venv.sh / setup_venv.ps1 install it first. Manual install:
+#   Linux, Blackwell (GB10 / DGX Spark) or recent x86_64 GPUs, CUDA 13.0:
+#     pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
+#   Windows / older drivers (RTX 3090, driver >= 550), CUDA 12.4:
+#     pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+# Tested with (Linux aarch64, GB10): torch 2.14.1+cu130, numpy 2.2.6, open3d 0.20.0, timm 1.0.30, scipy 1.18.1,
+# pandas 3.0.6, plotly 7.1.0.
+#
+# Camera capture (camera_convert_data.py capture mode) needs harvesters + genicam and Photoneo's
+# photoneo_genicam helpers; it runs from their own venv and is not needed here (--to-bop conversion only
+# needs numpy + pillow).
+
+# core: data, models, refinement
 numpy>=1.26,<2.3
 pillow>=10
 pyyaml>=6
@@ -8,8 +20,10 @@ open3d>=0.19
 scipy>=1.11
 tqdm>=4.66
 tensorboard>=2.16
-# notebook / reporting
+
+# notebooks / reporting (notebooks/*.ipynb, `jupyter execute`)
 pandas>=2.2
 plotly>=5.20
 ipykernel>=6.29
 nbclient>=0.10
+nbformat>=5.9

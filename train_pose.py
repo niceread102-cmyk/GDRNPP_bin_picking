@@ -88,7 +88,9 @@ def main():
     print(f"train scenes {train_scenes} ({len(train_frames)} frames) | val scenes {val_scenes} ({len(val_frames)})")
 
     nw = cfg.data.num_workers
-    loader_kw = dict(num_workers=nw, collate_fn=cat_collate, pin_memory=True, persistent_workers=nw > 0)
+    # spawn (the Windows default): forked workers deadlock on Linux
+    loader_kw = dict(num_workers=nw, collate_fn=cat_collate, pin_memory=True, persistent_workers=nw > 0,
+                     multiprocessing_context="spawn" if nw > 0 else None)
     train_loader = DataLoader(PoseCropDataset(train_frames, model, pc, train=True, obj_id=cfg.data.obj_id),
                               batch_size=tc.batch_frames, shuffle=True, drop_last=True, **loader_kw)
     val_loader = DataLoader(PoseCropDataset(val_frames, model, pc, train=False, obj_id=cfg.data.obj_id),

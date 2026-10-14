@@ -50,6 +50,21 @@ detector:
     mask_thresh: 0.5
     min_visib_px: 500                      # GT considered "should detect" above this
     iou_thresh: 0.5
+  finetune:                                # finetuning_detector.py: sim-trained detector + real captures
+    init: runs/detector/best.pt
+    out_dir: runs/detector_ft
+    real_root: data/pseudo_gt_70_bop
+    real_val_every: 3                      # hold out every 3rd real view (offset 1): 23 of 70 views
+    real_val_views: null                   # or an explicit list of view ids (overrides real_val_every)
+    real_fraction: 0.5                     # share of real frames per batch (oversampled; sim keeps full bins)
+    epochs: 12
+    iters_per_epoch: 150
+    batch_size: 8
+    lr: 0.002                              # 1/10 of the from-scratch lr
+    warmup_iters: 100
+    freeze_backbone: false
+    eval_every_epochs: 1
+    sim_val_view_stride: 10
 
 # ---------------------------------------------------------------------------- stage 2
 pose:
@@ -118,6 +133,24 @@ pose:
   eval:
     every_epochs: 5
     crops_per_frame: 16
+  finetune:                                # finetuning_pose.py: sim-trained pose net + real pseudo-GT captures
+    init: runs/pose/best.pt                # architecture / crop / augmentation settings come from this checkpoint
+    out_dir: runs/pose_ft
+    real_root: data/pseudo_gt_70_bop
+    real_split_file: runs/detector_ft/real_split.json   # same held-out views as the detector fine-tuning
+    real_val_every: 3                      # fallback split if real_split_file is missing
+    real_fraction: 0.5                     # share of real frames per batch (oversampled; sim keeps full bins)
+    epochs: 12
+    iters_per_epoch: 150
+    batch_frames: 4                        # x crops_per_frame of the checkpoint
+    lr: 3.0e-5                             # ~1/10 of the from-scratch lr
+    warmup_iters: 100
+    freeze_backbone: false
+    eval_every_epochs: 1
+    sim_val_view_stride: 1                 # all 100 sim val views (1600 crops): a stable ranking signal
+    select_metric: rot_deg_median          # best.pt = lowest mean real/sim rotation error: rot_deg_median | rot_deg_p95
+    select_rot_deg: 10.0                   # logged: share of crops inside the ICP basin
+    log_every: 25
 
 # ---------------------------------------------------------------------------- stage 3
 refine:
@@ -127,6 +160,22 @@ refine:
   mask_erode_px: 2                         # drop mask-edge points (neighbour bleed / depth edge noise)
   max_rot_change_deg: 30.0                 # reject ICP corrections larger than these
   max_trans_change_mm: 15.0
+  # before ICP, slide the network pose along its viewing ray to the measured depth in the mask. The network infers
+  # depth from apparent size and reads real Photoneo parts ~1 % small (+7 mm, ICP rejects half). Detector masks,
+  # real 20 frames: confident 2.4 -> 4.7 per frame (of 5). Sim pile: 61 -> 73 per frame, but confident-and-wrong
+  # 4 -> 24 (mostly in-plane rotation; centre 0.6 mm). See notebooks/results_photoneo_summary.ipynb
+  depth_anchor: true
+  depth_anchor_min_px: 30                  # need this many CAD surface points on valid mask pixels
+  dedup_mm: 10.0                           # final centres closer than this = one part, keep the best ICP fit (0 = off)
+  # drop detections whose pose the depth does not confirm (false detections: no depth outside the bin, bin rim,
+  # objects outside the bin, partial / duplicate masks). Rejected ones go to <out>/rejected/. false = keep them
+  # (flagged not confident). Looser than the confidence flag below. See notebooks/results_photoneo_summary.ipynb
+  reject_unverified: true
+  verify_min_fitness: 0.5                  # ICP inlier share (real parts: >= 0.88 real, >= 0.65 sim pile)
+  verify_max_rmse_ratio: 1.5               # fit error vs this frame's median
+  verify_max_rmse_mm: 2.0
+  verify_min_mask_cover: 0.8               # share of the mask inside the CAD silhouette at the final pose
+  verify_max_mask_overlap: 0.5             # share of the mask inside a larger kept mask = partial / duplicate
   # label-free confidence flag per detection: ICP accepted AND fitness >= min AND
   # inlier RMSE <= min(confidence_rmse_ratio * this frame's median RMSE, confidence_max_rmse_mm)
   confidence_min_fitness: 0.9              # share of observed depth points within 2 mm of the CAD surface
@@ -135,5 +184,6 @@ refine:
 
 infer:
   score_thresh: 0.5
+  det_scale: 1.0                           # detector input scale; < 1 when parts look larger (in px) than in training
   min_mask_px: 300
   pose_batch: 64

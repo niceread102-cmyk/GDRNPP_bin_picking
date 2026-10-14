@@ -15,6 +15,9 @@ Every part in the bin has a GT pose, including fully occluded ones (px_count_vis
 Parts that the sim "picked" are NOT deleted from scene_gt: they are parked on the floor 1.2-1.8 m
 outside the bin (world z = 10 mm). The loader drops them using the bin footprint from the config.
 There is no stored point cloud; it is back-projected from depth + K (camera frame, mm).
+
+Real captures (e.g. data/pseudo_gt_20_bop) use the same layout with `train_real/` instead of `train_pbr/`, no
+config_resolved.yaml (no bin filter) and no cam_*_w2c (t_world = camera frame).
 """
 from __future__ import annotations
 
@@ -140,11 +143,13 @@ class BinPoseDataset(Dataset):
         self.n_points = n_points
         self.to_tensor = to_tensor
         self.rng = np.random.default_rng(seed)
-        self.bin_half_xy = read_bin_inner_size_mm(self.shards[0] / "config_resolved.yaml")[:2] / 2 + bin_margin_mm
+        bin_cfg = self.shards[0] / "config_resolved.yaml"
+        self.bin_half_xy = read_bin_inner_size_mm(bin_cfg)[:2] / 2 + bin_margin_mm if bin_cfg.exists() else None
+        self.split = "train_real" if (self.shards[0] / "train_real").is_dir() else "train_pbr"
 
         self.frames: list[Frame] = []
         for shard in self.shards:
-            for scene_dir in sorted((shard / "train_pbr").iterdir()):
+            for scene_dir in sorted((shard / self.split).iterdir()):
                 if not scene_dir.is_dir() or (scenes is not None and scene_dir.name not in scenes):
                     continue
                 for p in sorted((scene_dir / "rgb").glob("*.png")):
@@ -174,7 +179,7 @@ class BinPoseDataset(Dataset):
     def _scene(self, shard: Path, scene: str) -> dict:
         key = (shard, scene)
         if key not in self._scene_cache:
-            d = shard / "train_pbr" / scene
+            d = shard / self.split / scene
             self._scene_cache[key] = {
                 "gt": json.load(open(d / "scene_gt.json")),
                 "info": json.load(open(d / "scene_gt_info.json")),
@@ -198,8 +203,8 @@ class BinPoseDataset(Dataset):
         R = np.asarray([g["cam_R_m2c"] for g in gts], dtype=np.float32).reshape(-1, 3, 3)
         t = np.asarray([g["cam_t_m2c"] for g in gts], dtype=np.float32).reshape(-1, 3)
         proj = t @ K.T
-        R_w2c = np.asarray(cam["cam_R_w2c"], dtype=np.float32).reshape(3, 3)
-        t_w2c = np.asarray(cam["cam_t_w2c"], dtype=np.float32)
+        R_w2c = np.asarray(cam.get("cam_R_w2c", np.eye(3).ravel()), dtype=np.float32).reshape(3, 3)
+        t_w2c = np.asarray(cam.get("cam_t_w2c", np.zeros(3)), dtype=np.float32)
         t_world = (t - t_w2c) @ R_w2c  # R_w2c^T (t - t_w2c) per row
         objects_all = {
             "obj_id": np.asarray([g["obj_id"] for g in gts], dtype=np.int64),
@@ -215,7 +220,8 @@ class BinPoseDataset(Dataset):
         }
         objects_all["visible"] = objects_all["visib_px"] > 0
 
-        in_bin = np.all(np.abs(t_world[:, :2]) <= self.bin_half_xy, axis=1)
+        in_bin = (np.all(np.abs(t_world[:, :2]) <= self.bin_half_xy, axis=1) if self.bin_half_xy is not None
+                  else np.ones(len(t), dtype=bool))
         objects_all = {k: a[in_bin] for k, a in objects_all.items()}
         keep = objects_all["visib_px"] >= self.min_visib_px
         return {
@@ -233,7 +239,7 @@ class BinPoseDataset(Dataset):
     def load_images(self, index: int, depth_scale: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """(rgb (H,W,3) uint8, depth (H,W) float32 mm, inst_mask (H,W) int32)."""
         fr = self.frames[index]
-        d = fr.shard / "train_pbr" / fr.scene
+        d = fr.shard / self.split / fr.scene
         name = f"{fr.view:06d}.png"
         rgb = np.array(Image.open(d / "rgb" / name).convert("RGB"))
         depth = np.asarray(Image.open(d / "depth" / name), dtype=np.float32) * depth_scale

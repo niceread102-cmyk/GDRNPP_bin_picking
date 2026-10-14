@@ -1,6 +1,6 @@
 """Full pipeline on dataset frames: detect -> GDRN pose -> ICP, with GT evaluation and visualisation.
 
-    .venv\\Scripts\\python infer.py --detector runs/detector/best.pt --pose runs/pose/best.pt
+    .venv\\Scripts\\python infer.py --detector runs/detector_ft/best.pt --pose runs/pose/best.pt
     .venv\\Scripts\\python infer.py --pose runs/pose/best.pt --gt-masks     # skip detector (GT masks)
 """
 from __future__ import annotations
@@ -20,12 +20,14 @@ from bin6d.detector import build_detector, set_native_scale
 from bin6d.geometry import bbox_to_crop, crop_pixel_grid, pixel_rays, sample_crops_batched
 from bin6d.pose_data import ObjectModel, build_network_input, frame_planes, input_channels
 from bin6d.pose_model import GDRNet, decode_pose, pose_errors
-from bin6d.refine import flag_confident, icp_refine, observed_points
+from bin6d.refine import (dedup_detections, depth_anchor, flag_confident, icp_refine, mask_cover, observed_points,
+                          reject_unverified)
 from bin6d.viz import gt_overlay_sets, render_2d
 
 
 def extra_args(ap):
-    ap.add_argument("--detector", default="runs/detector/best.pt")
+    ap.add_argument("--detector", default="runs/detector_ft/best.pt",
+                    help="sim + real fine-tuned (finetuning_detector.py); sim only: runs/detector/best.pt")
     ap.add_argument("--pose", default="runs/pose/best.pt")
     ap.add_argument("--gt-masks", action="store_true", help="use GT visible masks instead of the detector")
     ap.add_argument("--scenes", nargs="*", default=None, help="default: data.val_scenes")
@@ -90,7 +92,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     agg = {"n_frames": 0, "n_dets": 0, "n_matched": 0, "add_s": [], "add_s_icp": [], "refined": 0,
-           "confident": 0, "confident_add_s": [], "confident_unmatched": 0}
+           "confident": 0, "confident_add_s": [], "confident_unmatched": 0, "rejected": 0, "rejected_matched": 0}
     for idx in range(0, len(frames), args.view_stride):
         meta = frames.frame_meta(idx)
         rgb, depth, inst = frames.load_images(idx, meta["depth_scale"])
@@ -106,7 +108,8 @@ def main():
             masks = inst_t[None] == ids[:, None, None]
             scores = np.ones(len(ids))
         else:
-            set_native_scale(det, *rgb.shape[:2])
+            h, w = rgb.shape[:2]                     # det_scale < 1: detect on a downscaled image (masks come back full size)
+            set_native_scale(det, round(h * ic.get("det_scale", 1.0)), round(w * ic.get("det_scale", 1.0)))
             o = det([rgb_t])[0]
             masks = o["masks"][:, 0] >= 0.5
             scores = o["scores"].cpu().numpy()
@@ -133,12 +136,18 @@ def main():
                 if iou >= 0.5 and gid in gt_index:
                     gt_k = gt_index[gid]
             m_np = m.cpu().numpy()
-            ref = icp_refine(R[n], t[n], observed_points(xyz_np, valid_np, m_np, rc.mask_erode_px),
+            t0 = (depth_anchor(R[n], t[n], depth, m_np, K_np, model.dense_points, model.dense_normals,
+                               rc.depth_anchor_min_px) if rc.get("depth_anchor") else t[n])
+            ref = icp_refine(R[n], t0, observed_points(xyz_np, valid_np, m_np, rc.mask_erode_px),
                              model.dense_points, model.dense_normals, rc)
             r = {"score": float(scores[n]), "R_rgbd": R[n].tolist(), "t_rgbd": t[n].tolist(),
+                 "t_anchored": np.asarray(t0).tolist(),
                  "R": np.asarray(ref["R"]).tolist(), "t": np.asarray(ref["t"]).tolist(),
                  "icp_refined": ref["refined"], "icp_fitness": ref["fitness"], "icp_rmse": ref["rmse"],
-                 "n_depth_points": ref["n_points"], "gt_inst_id": None}
+                 "n_depth_points": ref["n_points"], "mask_idx": n, "mask_px": int(m_np.sum()),
+                 "mask_cover": mask_cover(np.asarray(ref["R"]), np.asarray(ref["t"]), m_np, K_np, model.dense_points,
+                                          model.dense_normals),
+                 "gt_inst_id": None}
             if gt_k is not None:
                 Rg = torch.from_numpy(objs["R"][gt_k][None]).to(device)
                 tg = torch.from_numpy(objs["t"][gt_k][None]).to(device)
@@ -150,14 +159,21 @@ def main():
                 r.update(gt_inst_id=int(objs["inst_id"][gt_k]), add_s=float(e0["add_s"]),
                          add_s_refined=float(e1["add_s"]), rot_deg_refined=float(e1["rot_deg"]),
                          add_s_refined_ok=bool(e1["add_s"] < 0.1 * model.diameter))
+            results.append(r)
+
+        results = dedup_detections(results, rc.get("dedup_mm", 0.0))
+        rejected = []
+        if rc.get("reject_unverified"):
+            results, rejected = reject_unverified(results, masks.cpu().numpy(), rc)
+        flag_confident(results, rc)
+        agg["rejected"] += len(rejected)
+        agg["rejected_matched"] += sum(r["gt_inst_id"] is not None for r in rejected)
+        for r in results:
+            if r["gt_inst_id"] is not None:
                 agg["add_s"].append(r["add_s"])
                 agg["add_s_icp"].append(r["add_s_refined"])
                 agg["n_matched"] += 1
-            agg["refined"] += ref["refined"]
-            results.append(r)
-
-        flag_confident(results, rc)
-        for r in results:
+            agg["refined"] += r["icp_refined"]
             if r["confident"]:
                 agg["confident"] += 1
                 if r["gt_inst_id"] is None:
@@ -169,6 +185,13 @@ def main():
         tag = f"{meta['scene']}_{meta['view']:06d}"
         with open(out_dir / f"{tag}.json", "w") as f:
             json.dump(results, f)
+        rej_path = out_dir / "rejected" / f"{tag}.json"
+        if rejected:
+            rej_path.parent.mkdir(exist_ok=True)
+            with open(rej_path, "w") as f:
+                json.dump(rejected, f)
+        elif rej_path.exists():
+            rej_path.unlink()
         if not args.no_viz:
             gt = gt_overlay_sets(objs, results, pc.min_visib_px)
             render_2d(rgb, K_np, results, model, gt, title=tag).save(out_dir / f"{tag}.png")
@@ -185,7 +208,8 @@ def main():
     d01 = 0.1 * model.diameter
     a0, a1 = np.array(agg["add_s"]), np.array(agg["add_s_icp"])
     summary = {"frames": agg["n_frames"], "detections": agg["n_dets"], "matched_to_gt": agg["n_matched"],
-               "icp_applied": agg["refined"]}
+               "icp_applied": agg["refined"], "rejected": agg["rejected"],
+               "rejected_matched_to_gt": agg["rejected_matched"]}
     if len(a0):
         summary.update({"add_s_0.1d_rgbd": float((a0 < d01).mean()), "add_s_0.1d_icp": float((a1 < d01).mean()),
                         "add_s_median_rgbd_mm": float(np.median(a0)), "add_s_median_icp_mm": float(np.median(a1))})

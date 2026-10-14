@@ -1,5 +1,7 @@
 # --- data: dataset and CAD models (data/bin_ds_*, data/*.stl) ---
 data/
+# raw camera captures from camera_convert_data.py (rgb / depth / point clouds, undistort map)
+camera/
 
 # --- model weights and training outputs ---
 # GDRNPP checkpoint, re-downloaded automatically from pose.pretrained_model.url
@@ -12,6 +14,11 @@ runs/
 *.onnx
 # interrupted downloads
 *.part
+# archives of data/, pretrained/, runs/ for sharing (300-400 MB each, over GitHub's 100 MB file limit)
+*.tar
+*.tar.gz
+*.tar.xz
+*.zip
 
 # --- environment ---
 .venv/

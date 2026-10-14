@@ -1,0 +1,2 @@
+# notebooks are stored without outputs (tools/strip_notebook_outputs.py; filter defined by setup_venv.sh / .ps1)
+*.ipynb filter=strip-notebook-output
