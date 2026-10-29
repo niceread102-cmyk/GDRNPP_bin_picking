@@ -5,7 +5,7 @@ Starts from detector.finetune.init (the sim-trained checkpoint) and mixes real f
 without forgetting full sim bins. Real frames are split by VIEW (a real root has a single scene); the held-out
 real views and the sim val scene are both evaluated, and best.pt is chosen on their mean F1.
 
-    .venv/bin/python finetuning_detector.py [--set detector.finetune.epochs=20] [--set detector.finetune.real_fraction=0.3]
+    .venv/bin/python train/finetune/finetuning_detector.py [--set detector.finetune.epochs=20] [--set detector.finetune.real_fraction=0.3]
     .venv/bin/python infer.py --detector runs/detector_ft/best.pt --set data.root=data/pseudo_gt_70_bop --scenes 000000 --view-stride 1 --out runs/photoneo70_ft
 """
 from __future__ import annotations
@@ -19,11 +19,13 @@ import torch
 from torch.utils.data import ConcatDataset, DataLoader, Subset, WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from bin_dataset import BinPoseDataset
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # project root: bin6d, data_conversion, train
+from data_conversion.bin_dataset import BinPoseDataset
 from bin6d.config import Cfg, parse_args, save_config
 from bin6d.detector import DetectionDataset, build_detector, det_collate, set_native_scale
-from train_detector import evaluate
-from train_pose import split_scenes, warmup_cosine
+from train.train_detector import evaluate
+from train.train_pose import split_scenes, warmup_cosine
 
 
 def split_real_views(frames: BinPoseDataset, fc) -> tuple[list[int], list[int]]:

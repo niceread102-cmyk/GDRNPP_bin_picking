@@ -1,0 +1,22 @@
+lite6 real control code
+terminal 1
+export REPO=~/Projects/GDRNPP_bin_picking/lite6_control
+source /opt/ros/jazzy/setup.bash
+source $REPO/xarm_ros2/install/setup.bash
+source $REPO/lite6_ws/install/setup.bash
+ros2 launch xarm_moveit_config lite6_moveit_realmove_custom.launch.py robot_ip:=192.168.1.150
+
+
+terminal 2
+export REPO=~/Projects/GDRNPP_bin_picking/lite6_control
+source /opt/ros/jazzy/setup.bash
+source $REPO/xarm_ros2/install/setup.bash
+source $REPO/lite6_ws/install/setup.bash
+ros2 run my_lite6_control sequence_real_action robot.gripper.service_setup=$REPO/xarm_ros2/install/setup.bash
+
+
+terminal 3
+cd ~/Projects/GDRNPP_bin_picking
+.venv/bin/python binpick/auto_pick.py 10
+.venv/bin/python binpick/auto_pick.py 10 --per-scan 15 #: 한 번 촬영에 최대 몇 개를 고를지 정합니다(기본 15).
+--no-robot #: 로봇에는 아무것도 보내지 않고 촬영과 선정만 봅니다.

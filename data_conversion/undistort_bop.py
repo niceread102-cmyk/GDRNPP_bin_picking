@@ -9,7 +9,7 @@ puts every visible GT mask fully inside the silhouette, 1.00 at the edges vs 0.8
 GT poses and K are pinhole quantities and stay unchanged; rgb is sampled bilinearly, depth and masks nearest;
 px_count_visib / bbox_visib in scene_gt_info.json are recomputed from the resampled masks.
 
-    .venv/bin/python undistort_bop.py --src /home/joon/FFB6D/data/side_plate_10k --dst data/side_plate_10k_undist \
+    .venv/bin/python data_conversion/undistort_bop.py --src /home/joon/FFB6D/data/side_plate_10k --dst data/side_plate_10k_undist \
         --scenes 000000 000001 000002 000003 000004
 """
 from __future__ import annotations

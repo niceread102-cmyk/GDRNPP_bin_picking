@@ -10,7 +10,7 @@ from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from torchvision.ops import masks_to_boxes
 from torchvision.transforms import v2 as T
 
-from bin_dataset import BinPoseDataset
+from data_conversion.bin_dataset import BinPoseDataset
 
 ARCHS = {"maskrcnn_resnet50_fpn_v2": maskrcnn_resnet50_fpn_v2, "maskrcnn_resnet50_fpn": maskrcnn_resnet50_fpn}
 

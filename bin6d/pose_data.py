@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
-from bin_dataset import BinPoseDataset, backproject, read_ply_mesh
+from data_conversion.bin_dataset import BinPoseDataset, backproject, read_ply_mesh
 from bin6d.augment import depth_dropout_and_noise, photometric
 from bin6d.geometry import (IMAGENET_MEAN, IMAGENET_STD, bbox_to_crop, canonicalize_symmetric_pose,
                             crop_pixel_grid, ego_to_allo, encode_site, farthest_point_sampling, pixel_rays,

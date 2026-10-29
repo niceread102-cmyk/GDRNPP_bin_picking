@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bin_dataset import BinPoseDataset
+from data_conversion.bin_dataset import BinPoseDataset
 from bin6d.config import parse_args
 from bin6d.pose_data import ObjectModel
 from bin6d.report import frame_index, load_frame, load_run

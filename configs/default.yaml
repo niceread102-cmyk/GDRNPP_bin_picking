@@ -157,6 +157,9 @@ refine:
   icp_max_corr_mm: [8.0, 4.0, 2.0]         # coarse-to-fine correspondence distances
   icp_iters: 30
   min_points: 30                           # skip ICP with fewer observed points
+  # failed ICP (point-to-plane sliding along a flat disc, fitness 0): retry point-to-point from the pose turned about
+  # the part axis by each of these (deg). [] = off. binpick/binpick_real.py turns it on (~35 % more verified parts)
+  icp_retry_turns_deg: []
   mask_erode_px: 2                         # drop mask-edge points (neighbour bleed / depth edge noise)
   max_rot_change_deg: 30.0                 # reject ICP corrections larger than these
   max_trans_change_mm: 15.0

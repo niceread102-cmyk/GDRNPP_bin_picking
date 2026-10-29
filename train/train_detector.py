@@ -1,6 +1,6 @@
 """Train the Mask R-CNN part detector (stage 1).
 
-    .venv\\Scripts\\python train_detector.py --config configs/default.yaml [--set detector.train.epochs=20] [--resume]
+    .venv\\Scripts\\python train/train_detector.py --config configs/default.yaml [--set detector.train.epochs=20] [--resume]
 """
 from __future__ import annotations
 
@@ -12,10 +12,12 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from torch.utils.tensorboard import SummaryWriter
 
-from bin_dataset import BinPoseDataset
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # project root: bin6d, data_conversion, train
+from data_conversion.bin_dataset import BinPoseDataset
 from bin6d.config import parse_args, save_config
 from bin6d.detector import DetectionDataset, build_detector, det_collate, set_native_scale
-from train_pose import split_scenes, warmup_cosine
+from train.train_pose import split_scenes, warmup_cosine
 
 
 @torch.no_grad()

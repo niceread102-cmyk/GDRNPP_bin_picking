@@ -25,7 +25,7 @@ and read **§6 "Isaac Sim에서 집을 부품의 6D pose 출력"**.
 2. Make sure the inputs exist (none of them are in git, see [Data and weights](#data-and-weights)):
    - simulation renders `~/FFB6D/data/side_plate_10k` (`SRC_ROOT` in the notebook's first cell);
    - the simulation-trained models `runs/detector/best.pt` and `runs/pose/best.pt`.
-3. Run all cells. The first run undistorts the renders (`undistort_bop.py`, the renders contain lens distortion)
+3. Run all cells. The first run undistorts the renders (`data_conversion/undistort_bop.py`, the renders contain lens distortion)
    and runs `infer.py` (about 5 min per configuration on a GB10); later runs reuse the results in `runs/sim10k_*`.
 4. §6 shows the selected parts on the image and prints their poses:
    - **selection**: confident poses with nothing on top (≤ 5 % of the visible CAD surface covered,
@@ -83,8 +83,8 @@ Data, weights and outputs are not in git (see `.gitignore`):
 
 ## Train
 ```bash
-.venv/bin/python train_detector.py          # -> runs/detector/best.pt  (simulation)
-.venv/bin/python train_pose.py              # -> runs/pose/best.pt      (simulation)
+.venv/bin/python train/train_detector.py          # -> runs/detector/best.pt  (simulation)
+.venv/bin/python train/train_pose.py              # -> runs/pose/best.pt      (simulation)
 .venv/bin/tensorboard --logdir runs
 ```
 `pose.use_pretrained_model: true` (default) initialises the ConvNeXt-base backbone from the official GDRNPP ITODD
@@ -93,8 +93,8 @@ checkpoint. Resume with `--resume`. Override any config value with `--set`, e.g.
 
 **Fine-tuning on real captures** (simulation + real frames in every batch, real frames split by view):
 ```bash
-.venv/bin/python finetuning_detector.py     # -> runs/detector_ft/best.pt  (detector.finetune in the config)
-.venv/bin/python finetuning_pose.py         # -> runs/pose_ft/best.pt      (pose.finetune in the config)
+.venv/bin/python train/finetune/finetuning_detector.py     # -> runs/detector_ft/best.pt  (detector.finetune in the config)
+.venv/bin/python train/finetune/finetuning_pose.py         # -> runs/pose_ft/best.pt      (pose.finetune in the config)
 ```
 The fine-tuned detector removes most false detections and the missed part orientation on real Photoneo data;
 the fine-tuned pose net does not change the final (post-ICP) accuracy, so `runs/pose/best.pt` stays the default.
@@ -116,10 +116,10 @@ e.g. another camera resolution).
 Each detection has a label-free `confident` flag (see `refine.confidence_*`); pick only confident poses.
 
 ## Real captures and other cameras
-- `camera_convert_data.py`: capture RGB / depth / point clouds from a Photoneo over GigE Vision (needs the
+- `data_conversion/camera_convert_data.py`: capture RGB / depth / point clouds from a Photoneo over GigE Vision (needs the
   harvesters / Photoneo examples venv), and `--to-bop` to convert the captures to the BOP layout, undistorted onto
   the pinhole K. Capture at the training camera setting (PrimaryCamera, 1236×1032, the default).
-- `undistort_bop.py`: resample a lens-distorted BOP dataset (rgb, depth, masks) onto its pinhole K. The pipeline
+- `data_conversion/undistort_bop.py`: resample a lens-distorted BOP dataset (rgb, depth, masks) onto its pinhole K. The pipeline
   back-projects depth with K only, so distorted images put edge parts in the wrong place.
 
 ## Visual validation

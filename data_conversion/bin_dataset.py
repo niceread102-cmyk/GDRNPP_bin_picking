@@ -293,7 +293,7 @@ def collate(batch: list[dict]) -> dict:
 if __name__ == "__main__":
     import sys
 
-    root = sys.argv[1] if len(sys.argv) > 1 else Path(__file__).parent / "data" / "bin_ds_side_plate_bp_sample"
+    root = sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "data" / "bin_ds_side_plate_bp_sample"
     ds = BinPoseDataset(root, n_points=20000)
     print(f"frames: {len(ds)}  shards: {[s.name for s in ds.shards]}")
     s = ds[0]

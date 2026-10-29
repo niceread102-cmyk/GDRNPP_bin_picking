@@ -1,0 +1,3 @@
+[submodule "lite6_control"]
+	path = lite6_control
+	url = https://github.com/niceread102-cmyk/lite6_control.git

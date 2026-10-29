@@ -16,10 +16,10 @@ The point cloud uses the device coordinate maps (ProjectedC * CoordinateMap), so
 raw sensor pixels (distorted, up to ~15 px at the image corners) and --to-bop resamples them onto the pinhole K.
 
 Run with the harvesters venv, which has harvesters/genicam installed:
-    ~/Projects/photoneo-python-examples/GigE-V/harvesters/.venv/bin/python camera_convert_data.py [serial] \
+    ~/Projects/photoneo-python-examples/GigE-V/harvesters/.venv/bin/python data_conversion/camera_convert_data.py [serial] \
         [--count N | --interactive]
 Convert the captures to the BOP layout read by infer.py / bin_dataset.py (no GT; any python with numpy + PIL):
-    .venv/bin/python camera_convert_data.py --to-bop data/real_capture_bop
+    .venv/bin/python data_conversion/camera_convert_data.py --to-bop data/real_capture_bop
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parents[1]           # data_conversion/ -> project root
 DEFAULT_EXAMPLES_DIR = Path.home() / "Projects/photoneo-python-examples/GigE-V/harvesters/advanced"
 DEFAULT_OUT_DIR = PROJECT_DIR / "camera"
 DEFAULT_MODELS_DIR = PROJECT_DIR / "data/pseudo_gt_70_bop/models"

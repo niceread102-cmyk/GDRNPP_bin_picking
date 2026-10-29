@@ -76,27 +76,39 @@ def mask_cover(R: np.ndarray, t: np.ndarray, mask: np.ndarray, K: np.ndarray, mo
     return float((mask & sil).sum() / max(mask.sum(), 1))
 
 
-def reject_unverified(results: list[dict], masks: np.ndarray, rc) -> tuple[list[dict], list[dict]]:
+def _overlap_px(a: np.ndarray, oa, b: np.ndarray, ob) -> int:
+    """Pixels set in both masks; a, b are crops whose top-left corners sit at oa, ob (row, col) in the image."""
+    y0, x0 = max(oa[0], ob[0]), max(oa[1], ob[1])
+    y1, x1 = min(oa[0] + a.shape[0], ob[0] + b.shape[0]), min(oa[1] + a.shape[1], ob[1] + b.shape[1])
+    if y1 <= y0 or x1 <= x0:
+        return 0
+    return int((a[y0 - oa[0]:y1 - oa[0], x0 - oa[1]:x1 - oa[1]] & b[y0 - ob[0]:y1 - ob[0], x0 - ob[1]:x1 - ob[1]]).sum())
+
+
+def reject_unverified(results: list[dict], masks, rc, offsets=None) -> tuple[list[dict], list[dict]]:
     """Keep only detections whose pose is verified against the depth, so every output is a real part:
     ICP accepted with fitness >= verify_min_fitness and fit error <= verify_max_rmse_ratio x this frame's median
     (capped at verify_max_rmse_mm; the cap alone with < 3 accepted fits), the CAD silhouette explains
     >= verify_min_mask_cover of the mask, and the mask is not mostly (>= verify_max_mask_overlap) inside a larger
     kept mask (partial / duplicate). Looser than flag_confident, which then grades the kept ones.
-    results[i]["mask_idx"] indexes masks (N,H,W) bool. Returns (kept, rejected); rejected get a "reject" reason."""
+    results[i]["mask_idx"] indexes masks (N,H,W) bool, or N mask crops with offsets (N,2) = (row, col) of each
+    crop's top-left corner in the image. Returns (kept, rejected); rejected get a "reject" reason."""
+    off = np.zeros((len(masks), 2), int) if offsets is None else np.asarray(offsets, int)
     rmse = [r["icp_rmse"] for r in results if r["icp_refined"]]
     limit = rc.verify_max_rmse_mm
     if len(rmse) >= 3:
         limit = min(limit, rc.verify_max_rmse_ratio * float(np.median(rmse)))
     kept, rejected = [], []
     for r in sorted(results, key=lambda r: -r["mask_px"]):                    # big masks first
-        m = masks[r["mask_idx"]]
+        i = r["mask_idx"]
         if not r["icp_refined"]:
             r["reject"] = "icp_rejected" if r["n_depth_points"] >= rc.min_points else "no_depth"
         elif r["icp_fitness"] < rc.verify_min_fitness or r["icp_rmse"] > limit:
             r["reject"] = "poor_fit"
         elif r["mask_cover"] < rc.verify_min_mask_cover:
             r["reject"] = "mask_not_explained"
-        elif any((m & masks[k["mask_idx"]]).sum() >= rc.verify_max_mask_overlap * r["mask_px"] for k in kept):
+        elif any(_overlap_px(masks[i], off[i], masks[k["mask_idx"]], off[k["mask_idx"]])
+                 >= rc.verify_max_mask_overlap * r["mask_px"] for k in kept):
             r["reject"] = "inside_other_mask"
         (rejected if "reject" in r else kept).append(r)
     order = {id(r): i for i, r in enumerate(results)}
@@ -134,7 +146,41 @@ def icp_refine(R: np.ndarray, t: np.ndarray, scene_pts: np.ndarray, model_pts: n
     result.update(fitness=float(reg.fitness), rmse=float(reg.inlier_rmse))
     if reg.fitness > 0 and d_rot <= rc.max_rot_change_deg and d_trans <= rc.max_trans_change_mm:
         result.update(R=T_new[:3, :3], t=T_new[:3, 3], refined=True)
+    elif rc.get("icp_retry_turns_deg"):
+        _icp_retry(R, t, src, model_pts, model_normals, rc, result)
     return result
+
+
+def _icp_retry(R, t, src, model_pts, model_normals, rc, result):
+    """Second try when point-to-plane ICP failed: on a part seen mostly as its flat disc, point-to-plane can slide
+    along the disc and lose every correspondence (fitness 0) although the start fits. Point-to-point ICP from the pose
+    turned about the part axis by each of rc.icp_retry_turns_deg; the best fit is kept if the part axis moved at most
+    rc.max_rot_change_deg and the centre at most rc.max_trans_change_mm (the turn about the axis itself is free: the
+    disc is near-symmetric and the gripper goes into the round centre hole). Updates result in place."""
+    est = o3d.pipelines.registration.TransformationEstimationPointToPoint()
+    crit = o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=rc.icp_iters)
+    best = None
+    for turn in rc.icp_retry_turns_deg:
+        a = np.radians(turn)
+        Rs = R @ np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]])
+        nrm_c = model_normals @ Rs.T
+        pts_c = model_pts @ Rs.T + t
+        tgt = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts_c[(nrm_c * pts_c).sum(1) < 0].astype(np.float64)))
+        T = np.eye(4)
+        for dist in rc.icp_max_corr_mm:
+            reg = o3d.pipelines.registration.registration_icp(src, tgt, dist, T, est, crit)
+            T = reg.transformation
+        Ts = np.eye(4)
+        Ts[:3, :3], Ts[:3, 3] = Rs, t
+        T_new = np.linalg.inv(T) @ Ts
+        axis_change = np.degrees(np.arccos(np.clip(R[:, 2] @ T_new[:3, 2], -1, 1)))
+        if (reg.fitness > 0 and axis_change <= rc.max_rot_change_deg
+                and np.linalg.norm(T_new[:3, 3] - t) <= rc.max_trans_change_mm
+                and (best is None or (reg.fitness, -reg.inlier_rmse) > (best[0], -best[1]))):
+            best = (float(reg.fitness), float(reg.inlier_rmse), T_new, turn)
+    if best is not None:
+        result.update(R=best[2][:3, :3], t=best[2][:3, 3], refined=True, fitness=best[0], rmse=best[1],
+                      icp_retry_turn=best[3])
 
 
 def flag_confident(results: list[dict], rc) -> None:

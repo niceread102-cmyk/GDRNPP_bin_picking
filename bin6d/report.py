@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from bin_dataset import BinPoseDataset, backproject
+from data_conversion.bin_dataset import BinPoseDataset, backproject
 from bin6d.pose_model import pose_errors
 from bin6d.refine import flag_confident
 

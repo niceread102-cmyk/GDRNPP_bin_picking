@@ -1,6 +1,6 @@
 """Train the GDRN-style RGB-D pose network on GT instance crops.
 
-    .venv\\Scripts\\python train_pose.py --config configs/default.yaml [--set pose.train.epochs=50] [--resume]
+    .venv\\Scripts\\python train/train_pose.py --config configs/default.yaml [--set pose.train.epochs=50] [--resume]
 """
 from __future__ import annotations
 
@@ -16,7 +16,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from bin_dataset import BinPoseDataset
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # project root: bin6d, data_conversion, train
+from data_conversion.bin_dataset import BinPoseDataset
 from bin6d.config import parse_args, save_config
 from bin6d.pose_data import ObjectModel, PoseCropDataset, cat_collate, input_channels
 from bin6d.pose_model import GDRNet, decode_pose, load_gdrnpp_backbone, pose_errors, pose_losses

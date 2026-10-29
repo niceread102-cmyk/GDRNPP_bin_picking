@@ -13,7 +13,7 @@ The median is the default: the p95 of a few hundred sim crops rests on ~16 crops
 first run picked epoch 1 on it, while the real metrics kept improving to epoch 11). The share of crops under
 pose.finetune.select_rot_deg is logged too; on real GT-mask crops it starts at ~100 %, so it cannot rank.
 
-    .venv/bin/python finetuning_pose.py [--set pose.finetune.epochs=20] [--set pose.finetune.real_fraction=0.3]
+    .venv/bin/python train/finetune/finetuning_pose.py [--set pose.finetune.epochs=20] [--set pose.finetune.real_fraction=0.3]
     .venv/bin/python infer.py --pose runs/pose_ft/best.pt --set data.root=data/pseudo_gt_70_bop --scenes 000000 --view-stride 1 --out runs/photoneo70_poseft
 """
 from __future__ import annotations
@@ -30,11 +30,13 @@ import torch
 from torch.utils.data import ConcatDataset, DataLoader, Subset, WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from bin_dataset import BinPoseDataset
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # project root: bin6d, data_conversion, train
+from data_conversion.bin_dataset import BinPoseDataset
 from bin6d.config import Cfg, parse_args, save_config
 from bin6d.pose_data import ObjectModel, PoseCropDataset, cat_collate, input_channels
 from bin6d.pose_model import GDRNet, decode_pose, pose_errors, pose_losses
-from train_pose import autocast_ctx, split_scenes, warmup_cosine
+from train.train_pose import autocast_ctx, split_scenes, warmup_cosine
 
 
 def split_real_views(frames: BinPoseDataset, fc) -> tuple[list[int], list[int]]:

@@ -14,7 +14,7 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 import numpy as np
 import torch
 
-from bin_dataset import BinPoseDataset
+from data_conversion.bin_dataset import BinPoseDataset
 from bin6d.config import Cfg, parse_args
 from bin6d.detector import build_detector, set_native_scale
 from bin6d.geometry import bbox_to_crop, crop_pixel_grid, pixel_rays, sample_crops_batched
